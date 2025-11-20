@@ -20,6 +20,13 @@
 #include "flight_control_loop.h"
 #include "auxiliary_services.h"
 
+// === Feature flag đặt ở đây ===
+// 1 = bật Web PID tuner, 0 = tắt
+#define PID_TUNE_WEBSOCKET 1
+#define PID_TUNE_WIFI_SSID "ESP32_PID_TUNER"
+#define PID_TUNE_WIFI_PASS "12345678"
+#include "pid_tune_websocket.h"
+
 using namespace fc;
 
 #define ESC_CALIBRATION_MODE  0   // Đổi thành 1 khi muốn calibrate ESC
@@ -85,6 +92,11 @@ public:
     void run() override {
         static uint32_t lastPrintMs = 0;
         g_aux.step(0.01f); // ~100Hz
+
+        #if PID_TUNE_WEBSOCKET
+            // Xử lý HTTP + WebSocket (PID tuner + streaming attitude)
+            pidtune_ws::update();
+        #endif
 
         uint32_t now = millis();
         if (now - lastPrintMs > 100) { // 10Hz
@@ -252,6 +264,18 @@ void setup() {
         g_bus
     );
     g_fcLoopPtr = &fcLoop;
+
+    #if PID_TUNE_WEBSOCKET
+        // Khởi động WiFi AP + WebSocket PID tuner
+        pidtune_ws::init(
+            PID_TUNE_WIFI_SSID,              // dùng SSID default "ESP32_PID_TUNER"
+            PID_TUNE_WIFI_PASS,              // dùng PASS default "12345678"
+            &g_bus,
+            &g_pidRollRate,
+            &g_pidPitchRate,
+            &g_pidYawRate
+    );
+    #endif
 
     // Start FreeRTOS tasks
     g_fcRunner.start();
