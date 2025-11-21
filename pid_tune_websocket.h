@@ -293,31 +293,62 @@ inline void handleWs() {
 }
 
 // ===== API public =====
-inline void init(const char* ssid,
-                 const char* password,
-                 sync::SharedBus* bus,
-                 ctl::PidController* rollPid,
-                 ctl::PidController* pitchPid,
-                 ctl::PidController* yawPid)
+inline void init(
+    const char* ssid,
+    const char* password,
+    sync::SharedBus* bus,
+    ctl::PidController* rollPid,
+    ctl::PidController* pitchPid,
+    ctl::PidController* yawPid)
 {
     s_bus      = bus;
     s_rollPid  = rollPid;
     s_pitchPid = pitchPid;
     s_yawPid   = yawPid;
 
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP(ssid ? ssid : s_defaultSsid,
-                password ? password : s_defaultPass);
-    IPAddress ip = WiFi.softAPIP();
-    Serial.print("[PID_WS] AP IP: ");
-    Serial.println(ip);
+    const char* staSsid = ssid     ? ssid     : s_defaultSsid;
+    const char* staPass = password ? password : s_defaultPass;
 
+    // --- KẾT NỐI VÀO WIFI NHÀ (STA MODE) ---
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(staSsid, staPass);
+
+    Serial.print("[PID_WS] Connecting to STA WiFi: ");
+    Serial.println(staSsid);
+
+    int retries = 50;             // ~50 * 200ms = 10s
+    while (WiFi.status() != WL_CONNECTED && retries-- > 0) {
+        delay(200);
+        Serial.print(".");
+    }
+    Serial.println();
+
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("[PID_WS] STA connect FAILED, PID tuner sẽ KHÔNG có web UI!");
+        // Nếu bạn MUỐN fallback về AP khi connect thất bại thì có thể bật block dưới đây:
+
+        /*
+        Serial.println("[PID_WS] Fallback sang AP mode...");
+        WiFi.mode(WIFI_AP);
+        WiFi.softAP("ESP32_PID_FALLBACK", "12345678");
+        IPAddress ip = WiFi.softAPIP();
+        Serial.print("[PID_WS] AP IP: ");
+        Serial.println(ip);
+        */
+    } else {
+        IPAddress ip = WiFi.localIP();
+        Serial.print("[PID_WS] STA IP: ");
+        Serial.println(ip);
+    }
+
+    // --- HTTP + WEBSOCKET SERVER GIỐNG CŨ ---
     s_httpServer.begin();
     s_wsServer.listen(81);
 
     Serial.println("[PID_WS] HTTP server on :80");
     Serial.println("[PID_WS] WS server   on :81");
 }
+
 
 inline void update() {
     handleHttp();
