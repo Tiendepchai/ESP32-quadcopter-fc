@@ -4,19 +4,6 @@
 #include <cstdint>
 #include "driver/uart.h"
 
-// ==== Feature flags ====
-// 0 = tắt Web PID tuner, 1 = bật
-#ifndef PID_tune_websocket
-#define PID_tune_websocket 0
-#endif
-
-// Alias chuẩn hóa để dùng trong code
-#define PID_TUNE_WEBSOCKET PID_tune_websocket
-
-// WiFi cho PID tuner (dùng khi PID_TUNE_WEBSOCKET = 1)
-#define PID_TUNE_WIFI_SSID "ESP32_PID_TUNER"
-#define PID_TUNE_WIFI_PASS "12345678"
-
 namespace fc {
 namespace cfg {
 
