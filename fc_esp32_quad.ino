@@ -1,4 +1,3 @@
-
 #include <Arduino.h>
 #include <Wire.h>
 #include <TinyGPSPlus.h>
@@ -20,16 +19,24 @@
 #include "flight_control_loop.h"
 #include "auxiliary_services.h"
 
-// === Feature flag đặt ở đây ===
-// 1 = bật Web PID tuner, 0 = tắt
-#define PID_TUNE_WEBSOCKET 1
+// === Feature flags PID tuner ===
+// UDP PID tuner (dùng với Gradio)
+#define PID_TUNE_UDP 1
+#define PID_TUNE_UDP_WIFI_STA 0   // 0 = ESP phát AP, 1 = join router/hotspot
+
 #define PID_TUNE_WIFI_SSID "ESP32_PID_TUNER"
 #define PID_TUNE_WIFI_PASS "12345678"
-#include "pid_tune_websocket.h"
+
+#include "pid_tune_udp.h"   // module UDP PID tuner
+
+#include "idle_finder.h"
+
+// 0 = bay bình thường, 1 = chạy tool tìm idle
+#define IDLE_FINDER_MODE 0
+
+#define ESC_CALIBRATION_MODE 0   // Đổi thành 1 khi muốn calibrate ESC
 
 using namespace fc;
-
-#define ESC_CALIBRATION_MODE  0   // Đổi thành 1 khi muốn calibrate ESC
 
 // ==== Global objects ====
 
@@ -68,7 +75,7 @@ safety::MotorOutputSafety g_motorSafety;
 safety::FailsafeManager   g_failsafe(g_rcRx);
 
 // GPS / Aux
-TinyGPSPlus            g_gps;
+TinyGPSPlus             g_gps;
 loop::AuxiliaryServices g_aux(g_bus, Serial2, &g_gps);
 
 // Control loop
@@ -86,39 +93,21 @@ public:
 
 class IoTask : public tasking::ITask {
 public:
-    // void run() override {
-    //     g_aux.step(0.1f); // ~100Hz
-    // }
     void run() override {
         static uint32_t lastPrintMs = 0;
         g_aux.step(0.01f); // ~100Hz
 
-        #if PID_TUNE_WEBSOCKET
-            // Xử lý HTTP + WebSocket (PID tuner + streaming attitude)
-            pidtune_ws::update();
-        #endif
-
         uint32_t now = millis();
         if (now - lastPrintMs > 100) { // 10Hz
             lastPrintMs = now;
-            fc::types::FusedAttitude att{};
-            fc::types::ControlInput rc{};
-
-            if (g_bus.getAttitude(att)) {
-                Serial.print(F("ATT: "));
-                Serial.print(att.roll_deg);  Serial.print(F(" / "));
-                Serial.print(att.pitch_deg); Serial.print(F(" / "));
-                Serial.println(att.yaw_deg);
-            }
-            if (g_bus.getControlInput(rc)) {
-                Serial.print(F("RC:  "));
-                Serial.print(rc.roll);      Serial.print(F(" "));
-                Serial.print(rc.pitch);     Serial.print(F(" "));
-                Serial.print(rc.yaw);       Serial.print(F(" "));
-                Serial.print(rc.throttle);  Serial.print(F(" arm="));
-                Serial.print(rc.arm);       Serial.print(F(" mode="));
-                Serial.println(rc.mode);
-            }
+            #if PID_TUNE_UDP
+                float kp, ki, kd;
+                fc::pidtune_udp::getCurrentPid(kp, ki, kd);
+                Serial.print(F("PID: "));
+                Serial.print(F("Kp=")); Serial.print(kp, 4);
+                Serial.print(F(" Ki=")); Serial.print(ki, 4);
+                Serial.print(F(" Kd=")); Serial.println(kd, 4);
+            #endif
         }
     }
 };
@@ -181,15 +170,25 @@ void setup() {
 
     Serial.println();
     Serial.println(F("===== FC ESP32 QUAD - INIT ====="));
-    Serial.println(F("Pin Map: M1=13, M2=12, M3=14, M4=27; RC PWM CH1=34,CH2=35,CH3=32,CH4=33,CH5=25,CH6=26"));
+    Serial.println(F("Pin Map: M1=13, M2=4, M3=14, M4=27; RC PWM CH1=34,CH2=35,CH3=32,CH4=33,CH5=25,CH6=26"));
 
-    // Init I2C & IMU
     Serial.println(F("[IMU] Initializing MPU6050..."));
     if (!g_imu.begin()) {
         Serial.println(F("[IMU] ERROR: MPU6050 init failed."));
     } else {
         Serial.println(F("[IMU] OK."));
+
+        // ==== IMU CALIBRATION ====
+        Serial.println(F("[IMU] Calibrating... đặt drone nằm yên trên mặt phẳng!"));
+        delay(2000); // cho drone ổn định 2s
+
+        if (!g_imu.runCalibration(1000)) {   // lấy 1000 mẫu để tính offset
+            Serial.println(F("[IMU] ERROR: calibration failed."));
+        } else {
+            Serial.println(F("[IMU] Calibration done."));
+        }
     }
+
 
     // Init attitude estimator
     g_est.setDt(cfg::LOOP_DT_S);
@@ -208,19 +207,19 @@ void setup() {
 
     #if ESC_CALIBRATION_MODE
         Serial.println(F("*** ESC CALIBRATION MODE ENABLED ***"));
-        Serial.println(F("THAO TOAN BO CANH TRUOC KHI TIEP TUC!!!"));
-        delay(3000); // cho ban thoi gian doc canh bao
+        Serial.println(F("THÁO TOÀN BỘ CÁNH TRƯỚC KHI TIẾP TỤC!!!"));
+        delay(3000); // cho bạn thời gian đọc cảnh báo
 
         {
             fc::esc::EscCalibrator calib;
-            calib.runCalibration(g_esc);
+            calib.runCalibration(g_esc, 6000, 6000);
         }
 
-        Serial.println(F("ESC calibration hoan tat."));
-        Serial.println(F("Hay tat nguon (ngat pin), doi 5s,"));
-        Serial.println(F("sau do dat ESC_CALIBRATION_MODE = 0 va upload lai code de bay binh thuong."));
+        Serial.println(F("ESC calibration hoàn tất."));
+        Serial.println(F("Hãy tắt nguồn (ngắt pin), đợi 5s,"));
+        Serial.println(F("sau đó đặt ESC_CALIBRATION_MODE = 0 và upload lại code để bay bình thường."));
 
-        // Dung tai day, khong start task nao ca
+        // Dừng tại đây, không start task nào cả
         while (true) {
             vTaskDelay(portMAX_DELAY);
         }
@@ -233,6 +232,12 @@ void setup() {
     g_rcInput.setExpo(0.3f, 0.2f);
     g_rcInput.setSlewLimit(2.0f);
 
+    #if IDLE_FINDER_MODE
+        // Chỉ chạy tool tìm idle, KHÔNG start flight control loop.
+        fc::calib::runIdleFinder(g_esc, g_rcInput);
+        // runIdleFinder() khong bao gio return.
+    #endif
+
     // Init GPS UART2
     Serial.println(F("[GPS] Init Serial2..."));
     Serial2.begin(cfg::GPS_BAUD, SERIAL_8N1, cfg::GPS_RX_PIN, cfg::GPS_TX_PIN);
@@ -241,12 +246,12 @@ void setup() {
     setupPidControllers();
 
     // Motor safety
-    g_motorSafety.setMinThrottleForSpin(0.05f);
+    g_motorSafety.setMinThrottleForSpin(0.02f);
     g_motorSafety.enableSoftRamp(true);
     g_motorSafety.setSoftRampRate(1.0f);
 
     // Mixer
-    g_mixer.setMinThrottleForSpin(0.02f);
+    g_mixer.setMinThrottleForSpin(0.0f);
 
     // Construct flight control loop object
     static loop::FlightControlLoop fcLoop(
@@ -265,16 +270,20 @@ void setup() {
     );
     g_fcLoopPtr = &fcLoop;
 
-    #if PID_TUNE_WEBSOCKET
-        // Khởi động WiFi AP + WebSocket PID tuner
-        pidtune_ws::init(
-            PID_TUNE_WIFI_SSID,              // dùng SSID default "ESP32_PID_TUNER"
-            PID_TUNE_WIFI_PASS,              // dùng PASS default "12345678"
+    #if PID_TUNE_UDP
+        // Dùng 0.0.0.0 => trong pid_tune_udp.h sẽ tự hiểu là broadcast
+        // => Telemetry ATT gửi tới 255.255.255.255:14550
+        // => Laptop nào trong mạng cũng nhận được, không cần biết IP trước
+        IPAddress groundIp(0, 0, 0, 0);
+        fc::pidtune_udp::init(
+            PID_TUNE_WIFI_SSID,
+            PID_TUNE_WIFI_PASS,
+            groundIp,
             &g_bus,
             &g_pidRollRate,
             &g_pidPitchRate,
             &g_pidYawRate
-    );
+        );
     #endif
 
     // Start FreeRTOS tasks
@@ -285,6 +294,11 @@ void setup() {
 }
 
 void loop() {
-    // Mọi thứ chạy trong FreeRTOS task; loop() để trống.
-    vTaskDelay(portMAX_DELAY);
+    #if PID_TUNE_UDP
+        // xử lý UDP PID tuner (gửi ATT + nhận PID) trong loopTask
+        fc::pidtune_udp::update();
+    #endif
+
+    // nhường CPU cho các task khác (WiFi, flight-control, v.v.)
+    vTaskDelay(1);   // hoặc delay(1);
 }

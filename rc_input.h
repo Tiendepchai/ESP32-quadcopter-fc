@@ -71,6 +71,15 @@ public:
         pitch = applyExpo(pitch, _expoRP);
         yaw   = applyExpo(yaw,   _expoYaw);
 
+        // Throttle curve: làm mềm ga đầu (0..~30%)
+        const float thrExpo = 0.7f;  // 0 = tắt, 0.3–0.7 = mềm vừa, 0.9 = rất mềm
+        if (thrExpo > 0.0f) {
+            float x = thr;          // x trong [0..1]
+            float soft = x * x;     // cong xuống, ga đầu nhỏ hơn
+            thr = soft * thrExpo + x * (1.0f - thrExpo);
+        }
+
+
         uint32_t now_us = tmp.stamp_us;
         if (!_hasPrev) {
             _prev = tmp;

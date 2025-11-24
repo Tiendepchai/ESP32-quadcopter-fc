@@ -21,7 +21,7 @@ constexpr int PWM_ESC_FREQ_HZ_FALLBACK = 50;     // Hz (servo-style)
 //  M3 = Rear-Left   (CW)
 //  M4 = Front-Left  (CCW)
 constexpr int MOT1_PIN = 13;   // Front-Right (CW)
-constexpr int MOT2_PIN = 12;   // Rear-Right (CCW)  // CẢNH BÁO: GPIO12 là strap MTDI
+constexpr int MOT2_PIN = 4;   // Rear-Right (CCW)  // CẢNH BÁO: GPIO12 là strap MTDI
 constexpr int MOT3_PIN = 14;   // Rear-Left (CW)
 constexpr int MOT4_PIN = 27;   // Front-Left (CCW)
 
@@ -73,12 +73,6 @@ constexpr int VBAT_ADC_PIN = 36;   // ADC1_CH0
 
 constexpr int LED_PIN    = 15;
 constexpr int BUZZER_PIN = 2;
-
-// Static assert / warning about GPIO12
-static_assert(MOT2_PIN == 12,
-              "Warning: MOT2_PIN is GPIO12 (MTDI strap). "
-              "Ensure ESC does not pull this pin high at boot, "
-              "or move MOT2 to GPIO4/GPIO5.");
 
 } // namespace cfg
 } // namespace fc

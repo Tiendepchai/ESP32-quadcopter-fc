@@ -81,8 +81,15 @@ public:
         auto pidPitch = _pidRatePitch.compute(rate_meas_pitch, desiredRatePitch);
         auto pidYaw   = _pidRateYaw  .compute(rate_meas_yaw,   desiredRateYaw);
 
+        // Giảm tác động PID theo mức ga – chống vụ "nhích 1% mà vọt hết ga"
+        float pidScale = rc.throttle;      // 0..1
+        pidRoll.out  *= pidScale;
+        pidPitch.out *= pidScale;
+        pidYaw.out   *= pidScale;
+
         fc::types::MotorCommand motors{};
         _mixer.compute(rc.throttle, pidRoll.out, pidPitch.out, pidYaw.out, motors);
+
 
         _failsafe.update();
         _failsafe.applyFailsafe(rc, motors);

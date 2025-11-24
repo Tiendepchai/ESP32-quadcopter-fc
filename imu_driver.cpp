@@ -29,6 +29,10 @@ bool Mpu6050Driver::begin() {
     return true;
 }
 
+bool Mpu6050Driver::runCalibration(std::size_t samples) {
+    return calibrate(samples);
+}
+
 bool Mpu6050Driver::configure() {
     if (!writeRegister(REG_PWR_MGMT_1, 0x00)) return false;
     if (!writeRegister(REG_CONFIG, 0x02))     return false; // DLPF ~98Hz

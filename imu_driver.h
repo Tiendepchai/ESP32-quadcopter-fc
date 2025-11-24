@@ -26,7 +26,7 @@ public:
 
     bool begin() override;
     bool read(fc::types::ImuSample& out) override;
-
+    bool runCalibration(std::size_t samples = 1000);
 private:
     uint8_t addr_;
     float gx_offset_dps_;
