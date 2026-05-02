@@ -16,7 +16,7 @@ class SharedBus {
 public:
     SharedBus() {
         _mux = portMUX_INITIALIZER_UNLOCKED;
-        _hasAtt = _hasRc = _hasBat = _hasGps = false;
+        _hasAtt = _hasRc = _hasRate = _hasBat = _hasGps = false;
     }
 
     void setAttitude(const fc::types::FusedAttitude& att) {
@@ -43,6 +43,20 @@ public:
         taskENTER_CRITICAL(const_cast<portMUX_TYPE*>(&_mux));
         bool h = _hasRc;
         if (h) out = _rc;
+        taskEXIT_CRITICAL(const_cast<portMUX_TYPE*>(&_mux));
+        return h;
+    }
+
+    void setRateTelemetry(const fc::types::RateTelemetry& rate) {
+        taskENTER_CRITICAL(&_mux);
+        _rate = rate;
+        _hasRate = true;
+        taskEXIT_CRITICAL(&_mux);
+    }
+    bool getRateTelemetry(fc::types::RateTelemetry& out) const {
+        taskENTER_CRITICAL(const_cast<portMUX_TYPE*>(&_mux));
+        bool h = _hasRate;
+        if (h) out = _rate;
         taskEXIT_CRITICAL(const_cast<portMUX_TYPE*>(&_mux));
         return h;
     }
@@ -80,10 +94,12 @@ private:
 
     fc::types::FusedAttitude _att;
     fc::types::ControlInput  _rc;
+    fc::types::RateTelemetry _rate;
     fc::types::BatteryState  _bat;
     fc::types::GpsData       _gps;
     bool _hasAtt;
     bool _hasRc;
+    bool _hasRate;
     bool _hasBat;
     bool _hasGps;
 };

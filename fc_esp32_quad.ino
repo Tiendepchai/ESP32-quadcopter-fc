@@ -23,6 +23,15 @@
 // UDP PID tuner (dùng với Gradio)
 #define PID_TUNE_UDP 1
 #define PID_TUNE_UDP_WIFI_STA 0   // 0 = ESP phát AP, 1 = join router/hotspot
+#define PID_TUNE_ALLOW_WHEN_ARMED 1
+#define PID_TUNE_ARMED_REQUIRE_MODE 0
+#define PID_TUNE_ARMED_MIN_THROTTLE 0.20f
+#define PID_TUNE_ARMED_MAX_THROTTLE 0.60f
+#define PID_TUNE_ARMED_MAX_STICK 0.10f
+#define PID_TUNE_ARMED_APPLY_COOLDOWN_MS 1800u
+#define PID_TUNE_MAX_STEP_KP 0.025f
+#define PID_TUNE_MAX_STEP_KI 0.012f
+#define PID_TUNE_MAX_STEP_KD 0.004f
 
 #define PID_TUNE_WIFI_SSID "ESP32_PID_TUNER"
 #define PID_TUNE_WIFI_PASS "12345678"
@@ -35,6 +44,8 @@
 #define IDLE_FINDER_MODE 0
 
 #define ESC_CALIBRATION_MODE 0   // Đổi thành 1 khi muốn calibrate ESC
+#define SERIAL_STATUS_LOG 1
+#define SERIAL_STATUS_LOG_INTERVAL_MS 500u
 
 using namespace fc;
 
@@ -80,6 +91,89 @@ loop::AuxiliaryServices g_aux(g_bus, Serial2, &g_gps);
 
 // Control loop
 loop::FlightControlLoop* g_fcLoopPtr = nullptr;
+volatile bool g_statusLogEnabled = false;
+
+const char* controlModeName(const fc::types::ControlInput& rc) {
+    if (!rc.arm) {
+        return modes::FlightModeManager::modeName(modes::Mode::DISARM);
+    }
+    switch (rc.mode) {
+    case 0: return modes::FlightModeManager::modeName(modes::Mode::ANGLE);
+    case 1: return modes::FlightModeManager::modeName(modes::Mode::ACRO);
+    case 2: return "MODE2";
+    default: return "MODE?";
+    }
+}
+
+void printStatusSnapshot() {
+    fc::types::ControlInput rc{};
+    fc::types::FusedAttitude att{};
+    fc::types::RateTelemetry rate{};
+    fc::types::BatteryState bat{};
+    fc::types::GpsData gps{};
+
+    const bool hasRc = g_bus.getControlInput(rc);
+    const bool hasAtt = g_bus.getAttitude(att);
+    const bool hasRate = g_bus.getRateTelemetry(rate);
+    const bool hasBat = g_bus.getBatteryState(bat);
+    const bool hasGps = g_bus.getGpsData(gps);
+
+    float rpKp, rpKi, rpKd, yKp, yKi, yKd;
+    fc::pidtune_udp::getCurrentPid(rpKp, rpKi, rpKd, yKp, yKi, yKd);
+
+    const char* tuneReason = "NO_RC";
+    bool tuneOk = false;
+    if (hasRc) {
+        tuneOk = fc::pidtune_udp::getTuneWindowStatus(rc, tuneReason);
+        if (tuneOk) {
+            tuneReason = "OK";
+        } else if (!rc.arm) {
+            tuneReason = "DISARMED";
+        } else if (!tuneReason || !tuneReason[0]) {
+            tuneReason = "BLOCKED";
+        }
+    }
+
+    char line[512];
+    snprintf(
+        line,
+        sizeof(line),
+        "[STAT] ms=%lu rc=%d att=%d rate=%d bat=%d gps=%d mode=%s mode_sw=%u arm=%d "
+        "thr=%.3f sticks=(%.2f,%.2f,%.2f) att_deg=(%.1f,%.1f,%.1f) "
+        "rate_dps=(%.1f/%.1f,%.1f/%.1f,%.1f/%.1f) "
+        "pid_rp=(%.4f,%.4f,%.4f) pid_y=(%.4f,%.4f,%.4f) tune=%s "
+        "vbat=%.2f gps_fix=%d sats=%u",
+        static_cast<unsigned long>(millis()),
+        hasRc ? 1 : 0,
+        hasAtt ? 1 : 0,
+        hasRate ? 1 : 0,
+        hasBat ? 1 : 0,
+        hasGps ? 1 : 0,
+        hasRc ? controlModeName(rc) : "NO_RC",
+        hasRc ? static_cast<unsigned>(rc.mode) : 0u,
+        hasRc ? (rc.arm ? 1 : 0) : 0,
+        hasRc ? rc.throttle : 0.0f,
+        hasRc ? rc.roll : 0.0f,
+        hasRc ? rc.pitch : 0.0f,
+        hasRc ? rc.yaw : 0.0f,
+        hasAtt ? att.roll_deg : 0.0f,
+        hasAtt ? att.pitch_deg : 0.0f,
+        hasAtt ? att.yaw_deg : 0.0f,
+        hasRate ? rate.roll_rate_dps : 0.0f,
+        hasRate ? rate.roll_setpoint_dps : 0.0f,
+        hasRate ? rate.pitch_rate_dps : 0.0f,
+        hasRate ? rate.pitch_setpoint_dps : 0.0f,
+        hasRate ? rate.yaw_rate_dps : 0.0f,
+        hasRate ? rate.yaw_setpoint_dps : 0.0f,
+        rpKp, rpKi, rpKd,
+        yKp, yKi, yKd,
+        tuneReason,
+        hasBat ? bat.vbat : 0.0f,
+        (hasGps && gps.fix) ? 1 : 0,
+        hasGps ? static_cast<unsigned>(gps.sats) : 0u
+    );
+    Serial.println(line);
+}
 
 // ===== Tasks =====
 class FlightControlTask : public tasking::ITask {
@@ -97,18 +191,13 @@ public:
         static uint32_t lastPrintMs = 0;
         g_aux.step(0.01f); // ~100Hz
 
+#if SERIAL_STATUS_LOG
         uint32_t now = millis();
-        if (now - lastPrintMs > 100) { // 10Hz
+        if (g_statusLogEnabled && now - lastPrintMs >= SERIAL_STATUS_LOG_INTERVAL_MS) {
             lastPrintMs = now;
-            #if PID_TUNE_UDP
-                float kp, ki, kd;
-                fc::pidtune_udp::getCurrentPid(kp, ki, kd);
-                Serial.print(F("PID: "));
-                Serial.print(F("Kp=")); Serial.print(kp, 4);
-                Serial.print(F(" Ki=")); Serial.print(ki, 4);
-                Serial.print(F(" Kd=")); Serial.println(kd, 4);
-            #endif
+            printStatusSnapshot();
         }
+#endif
     }
 };
 
@@ -226,8 +315,12 @@ void setup() {
     #endif
 
     // Init RC
-    Serial.println(F("[RC] Initializing PWM receiver (dummy)..."));
-    g_rcRx.begin();
+    Serial.println(F("[RC] Initializing PWM receiver..."));
+    if (!g_rcRx.begin()) {
+        Serial.println(F("[RC] ERROR: PWM receiver init failed."));
+    } else {
+        Serial.println(F("[RC] OK."));
+    }
     g_rcInput.setDeadband(0.03f);
     g_rcInput.setExpo(0.3f, 0.2f);
     g_rcInput.setSlewLimit(2.0f);
@@ -286,11 +379,13 @@ void setup() {
         );
     #endif
 
+    Serial.println(F("[LOG] [STAT] ms rc att rate bat gps mode mode_sw arm thr sticks att_deg rate_dps(meas/sp) pid_rp pid_y tune vbat gps_fix sats"));
+    Serial.println(F("===== FC ESP32 QUAD - READY ====="));
+
     // Start FreeRTOS tasks
+    g_statusLogEnabled = true;
     g_fcRunner.start();
     g_ioRunner.start();
-
-    Serial.println(F("===== FC ESP32 QUAD - READY ====="));
 }
 
 void loop() {

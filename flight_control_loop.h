@@ -77,6 +77,16 @@ public:
         float rate_meas_pitch = s.gy;
         float rate_meas_yaw   = s.gz;
 
+        fc::types::RateTelemetry rateTelemetry{};
+        rateTelemetry.roll_rate_dps = rate_meas_roll;
+        rateTelemetry.pitch_rate_dps = rate_meas_pitch;
+        rateTelemetry.yaw_rate_dps = rate_meas_yaw;
+        rateTelemetry.roll_setpoint_dps = desiredRateRoll;
+        rateTelemetry.pitch_setpoint_dps = desiredRatePitch;
+        rateTelemetry.yaw_setpoint_dps = desiredRateYaw;
+        rateTelemetry.stamp_us = s.stamp_us;
+        _bus.setRateTelemetry(rateTelemetry);
+
         auto pidRoll  = _pidRateRoll .compute(rate_meas_roll,  desiredRateRoll);
         auto pidPitch = _pidRatePitch.compute(rate_meas_pitch, desiredRatePitch);
         auto pidYaw   = _pidRateYaw  .compute(rate_meas_yaw,   desiredRateYaw);

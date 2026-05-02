@@ -45,6 +45,17 @@ struct ControlInput {
     uint32_t stamp_us; // [us]
 };
 
+struct RateTelemetry {
+    // Rate thực đo và setpoint của từng trục, đơn vị deg/s.
+    float roll_rate_dps;
+    float pitch_rate_dps;
+    float yaw_rate_dps;
+    float roll_setpoint_dps;
+    float pitch_setpoint_dps;
+    float yaw_setpoint_dps;
+    uint32_t stamp_us; // [us]
+};
+
 struct MotorCommand {
     // Lệnh động cơ chuẩn hóa [0..1], sau đó sẽ map sang micro giây.
     float m1; // Front-Right (CW)

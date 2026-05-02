@@ -28,6 +28,18 @@ public:
 
     void setMode(Mode m) { _mode = m; }
     Mode getMode() const { return _mode; }
+    static const char* modeName(Mode m) {
+        switch (m) {
+        case Mode::DISARM:  return "DISARM";
+        case Mode::ANGLE:   return "ANGLE";
+        case Mode::ACRO:    return "ACRO";
+        case Mode::ALTHOLD: return "ALTHOLD";
+        case Mode::POSHOLD: return "POSHOLD";
+        case Mode::RTH:     return "RTH";
+        default:            return "UNKNOWN";
+        }
+    }
+    const char* getModeName() const { return modeName(_mode); }
 
     void setAnglePGains(float pRoll,float pPitch) {
         _pAngleRoll  = pRoll;

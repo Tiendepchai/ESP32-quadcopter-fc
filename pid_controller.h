@@ -36,6 +36,12 @@ public:
         _kp = kp; _ki = ki; _kd = kd;
     }
 
+    void getGains(float& kp, float& ki, float& kd) const {
+        kp = _kp;
+        ki = _ki;
+        kd = _kd;
+    }
+
     void setDt(float dt) {
         if (dt <= 0.0f) dt = 0.001f;
         _dt = dt;
